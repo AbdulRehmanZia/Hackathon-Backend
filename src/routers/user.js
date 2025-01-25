@@ -10,6 +10,17 @@ const router = express.Router();
 
 //edit user
 
+
+router.get('/all-users', async (req, res) => {
+  try {
+    const users = await userModel.find();
+    sendResponse(res, 200, users, true, "Users Fetched Successfully");
+  }
+  catch (err) {
+    sendResponse(res, 500, null, false, "Something went wrong");
+  }
+}
+)
 router.put("/edit/:id", authenticateUser, async (req, res) => {
   console.log("Editing user...");
 try {
