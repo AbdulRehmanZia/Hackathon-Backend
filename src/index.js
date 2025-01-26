@@ -10,7 +10,7 @@ import connectDB from "./db/connectDB.js";
 import cors from "cors";
 
 const app = express();
-pp.use(
+app.use(
     cors({
       origin: "http://localhost:5173", // Replace with your frontend URL
       credentials: true, // Allow credentials (cookies, tokens)
