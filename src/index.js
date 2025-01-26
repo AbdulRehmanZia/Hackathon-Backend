@@ -10,8 +10,12 @@ import connectDB from "./db/connectDB.js";
 import cors from "cors";
 
 const app = express();
-app.use(cors("*"))
-const PORT = 5000;
+pp.use(
+    cors({
+      origin: "http://localhost:5173", // Replace with your frontend URL
+      credentials: true, // Allow credentials (cookies, tokens)
+    })
+  );const PORT = 5000;
 app.listen(PORT, () => console.log(`Server is Running on Port: ${PORT}`));
 
 app.use(morgan("dev"));
