@@ -1,100 +1,144 @@
+import express from "express";
 import userModel from "../models/userModel.js";
 import { editUserSchema } from "../validations/schemas.js";
-import sendResponse from "../utilis/sendResponse.js";
-import express from "express";
+import sendResponse from "../utils/sendResponse.js";
 import { authenticateUser } from "../middleware/authenticateUser.js";
+import { restrictTo } from "../middleware/restrictTo.js";
 
 const router = express.Router();
 
-//get all users
-router.get("/all-users", async (req, res) => {
-  try {
-    const users = await userModel.find();
-    sendResponse(res, 200, users, true, "Users Fetched Successfully");
-  } catch (err) {
-    sendResponse(res, 500, null, false, "Something went wrong");
-  }
-});
+// 1. Get all users (admin only) 
+router.get(
+  "/all-users",
+  authenticateUser,
+  restrictTo("admin"),
+  async (req, res) => {
+    try {
+      // Aggregation pipeline to fetch all users with additional details
+      const users = await userModel.aggregate([
+        {
+          $project: {
+            _id: 1,
+            CNIC: 1,
+            name: 1,
+            role: 1,
+            department: 1,
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        },
+        { $sort: { createdAt: -1 } }, // Sort by creation date (newest first)
+      ]);
 
-//get single user
-
-router.get("/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const user = await userModel.findById(id);
-    if (!user) {
-      return sendResponse(res, 404, null, false, "User not found.");
+      return sendResponse(res, 200, users, true, "Users fetched successfully.");
+    } catch (error) {
+      console.error("Fetch all users error:", error);
+      return sendResponse(res, 500, null, false, "Internal Server Error.");
     }
-    return sendResponse(res, 200, user, true, "User fetched successfully.");
-  } catch (error) {
-    console.error(error);
-    return sendResponse(res, 500, null, false, "Internal Server Error.");
   }
-});
+);
 
-//edit user
-router.put("/edit/:id", authenticateUser, async (req, res) => {
-  console.log("Editing user...");
-  try {
-    const { id } = req.params;
-    const { value, error } = editUserSchema.validate(req.body);
+// 2. Get a single user by ID 
+router.get(
+  "/:id",
+  authenticateUser,
+  restrictTo("admin"),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
 
-    if (error) return sendResponse(res, 400, null, false, error.message);
+      const user = await userModel.findById(id)
+      if (!user) {
+        return sendResponse(res, 404, null, false, "User not found.");
+      }
 
-    const userExists = userModel.findById(id);
-
-    if (!userExists)
-      return sendResponse(res, 404, null, false, "User not Found.");
-
-    const updatedUserObj = { ...value };
-
-    const updatedUser = await userModel.findByIdAndUpdate(
-      id,
-      { $set: { ...updatedUserObj } },
-      { new: true, runValidators: true }
-    );
-
-    if (!updatedUser) {
-      return sendResponse(res, 404, null, false, "Failed to edit user.");
+      return sendResponse(res, 200, user, true, "User fetched successfully.");
+    } catch (error) {
+      console.error("Fetch single user error:", error);
+      return sendResponse(res, 500, null, false, "Internal Server Error.");
     }
-
-    return sendResponse(
-      res,
-      201,
-      updatedUser,
-      true,
-      "User edited successfully."
-    );
-  } catch (error) {
-    console.error(error);
-    return sendResponse(res, 500, null, false, "Internal Server Error.");
   }
-});
+);
 
-//delete user
+// Get current user (authenticated user)
+router.get(
+  "/my-info",
+  authenticateUser,
+  async (req, res) => {
+    try {
+      // Fetch current user (from req.user attached by authenticateUser middleware)
+      const user = await userModel.findById(req.user._id)
+      if (!user) {
+        return sendResponse(res, 404, null, false, "User not found.");
+      }
 
-router.delete("/delete/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const userExists = await userModel.findById(id);
-
-    if (!userExists)
-      return sendResponse(res, 404, null, false, "User not found.");
-
-    const deletedUser = await userModel.findByIdAndDelete(id);
-
-    return sendResponse(
-      res,
-      201,
-      deletedUser,
-      true,
-      "User deleted successfully."
-    );
-  } catch (error) {
-    console.error(error);
-    return sendResponse(res, 500, null, false, "Internal Server Error.");
+      return sendResponse(res, 200, user, true, "User info fetched successfully.");
+    } catch (error) {
+      console.error("Fetch current user error:", error);
+      return sendResponse(res, 500, null, false, "Internal Server Error.");
+    }
   }
-});
+);
+
+// 4. Edit user (admin only)
+router.put(
+  "/edit/:id",
+  authenticateUser,
+  restrictTo("admin"),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      // Validate request body
+      const { error, value } = editUserSchema.validate(req.body);
+      if (error) {
+        return sendResponse(res, 400, null, false, error.message);
+      }
+
+      // Check if user exists
+      const userExists = await userModel.findById(id);
+      if (!userExists) {
+        return sendResponse(res, 404, null, false, "User not found.");
+      }
+
+      // Update user
+      const updatedUser = await userModel.findByIdAndUpdate(
+        id,
+        { $set: value },
+        { new: true, runValidators: true }
+      ).select("-password"); // Exclude password
+
+      return sendResponse(res, 200, updatedUser, true, "User updated successfully.");
+    } catch (error) {
+      console.error("Edit user error:", error);
+      return sendResponse(res, 500, null, false, "Internal Server Error.");
+    }
+  }
+);
+
+// 5. Delete user (admin only)
+router.delete(
+  "/delete/:id",
+  authenticateUser,
+  restrictTo("admin"),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      // Check if user exists
+      const userExists = await userModel.findById(id);
+      if (!userExists) {
+        return sendResponse(res, 404, null, false, "User not found.");
+      }
+
+      // Delete user
+      const deletedUser = await userModel.findByIdAndDelete(id);
+      return sendResponse(res, 200, deletedUser, true, "User deleted successfully.");
+    } catch (error) {
+      console.error("Delete user error:", error);
+      return sendResponse(res, 500, null, false, "Internal Server Error.");
+    }
+  }
+);
 
 export default router;

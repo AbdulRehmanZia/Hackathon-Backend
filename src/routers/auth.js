@@ -1,87 +1,72 @@
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
-import userModel from "../models/userModel.js";
-import { registerSchema, loginSchema } from "../validations/schemas.js";
-import sendResponse from "../utilis/sendResponse.js";
 import express from "express";
+import userModel from "../models/userModel.js";
+import sendResponse from "../utils/sendResponse.js";
+import { registerSchema, loginSchema } from "../validations/schemas.js";
 
 const router = express.Router();
-//Register a new user
 
+// Register (Admin Only)
 router.post("/register", async (req, res) => {
   try {
+   
     const { error, value } = registerSchema.validate(req.body);
+    if (error) {
+      return sendResponse(res, 400, null, false, error.message);
+    }
 
-    if (error) return sendResponse(res, 400, null, false, error.message);
-
-    const existingUser = await userModel.findOne({ email: value.email });
-
-    if (existingUser)
-      return sendResponse(
-        res,
-        403,
-        null,
-        false,
-        "User with this email already exists."
-      );
+    
+    const existingUser = await userModel.findOne({ CNIC: value.CNIC });
+    if (existingUser) {
+      return sendResponse(res, 409, null, false, "CNIC already registered.");
+    }
 
     const hashedPassword = await bcrypt.hash(value.password, 10);
     value.password = hashedPassword;
 
-    let newUser = new userModel({ ...value });
-    newUser = await newUser.save();
+    const newUser = await userModel.create(value);
+    const userData = newUser.toObject();
+    delete userData.password;
 
-    return sendResponse(
-      res,
-      201,
-      newUser,
-      true,
-      "User registered successfully."
-    );
+    return sendResponse(res, 201, userData, true, "User registered.");
   } catch (error) {
-    console.error(error);
+    console.error("Registration error:", error);
     return sendResponse(res, 500, null, false, "Internal Server Error.");
   }
 });
 
-//Login a user
-
 router.post("/login", async (req, res) => {
   try {
-    const { value, error } = loginSchema.validate(req.body);
+    // Validate request body
+    const { error, value } = loginSchema.validate(req.body);
+    if (error) {
+      return sendResponse(res, 400, null, false, error.message);
+    }
 
-    if (error) return sendResponse(res, 400, null, false, error.message);
+    const user = await userModel.findOne({ CNIC: value.CNIC }).lean();
+    if (!user) {
+      return sendResponse(res, 404, null, false, "CNIC not found.");
+    }
 
-    const user = await userModel.findOne({ email: value.email }).lean();
+    const isPasswordValid = await bcrypt.compare(value.password, user.password);
+    if (!isPasswordValid) {
+      return sendResponse(res, 401, null, false, "Invalid credentials.");
+    }
 
-    if (!user)
-      return sendResponse(
-        res,
-        404,
-        null,
-        false,
-        "No user found with this email."
-      );
+    const payload = {
+      _id: user._id,
+      CNIC: user.CNIC,
+      role: user.role,
+    };
+    const token = jwt.sign(payload, process.env.AUTH_SECRET, {
+     
+    });
 
-    const isPasswordCorrect = await bcrypt.compare(
-      value.password,
-      user.password
-    );
 
-    if (!isPasswordCorrect)
-      return sendResponse(res, 403, null, false, "Invalid credentials.");
-
-    var token = jwt.sign(user, process.env.AUTH_SECRET);
-
-    return sendResponse(
-      res,
-      200,
-      { user, token },
-      true,
-      "User logged in successfully."
-    );
+    return sendResponse(res, 200, { user, token }, true, "Login successful.");
   } catch (error) {
-    console.error(error);
+    console.error("Login error:", error);
     return sendResponse(res, 500, null, false, "Internal Server Error.");
   }
 });
